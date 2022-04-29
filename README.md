@@ -8,9 +8,8 @@
 
 ## Directory Structure
 ┬PlatformIO  
-├Raspberry Pi  
-│└Python  
-└Documents
+└Raspberry Pi  
+&nbsp;&nbsp;&nbsp;└Python  
 
 ## Update History
 - 2022/04/28 リポジトリ作成
