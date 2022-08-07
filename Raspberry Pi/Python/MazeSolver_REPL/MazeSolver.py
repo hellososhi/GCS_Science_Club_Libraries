@@ -10,7 +10,6 @@ import numpy as np
 
 
 # 被災者の定数
-
 VICTIM_NONE = 0b000
 VICTIM_H = 0b001
 VICTIM_S = 0b010
@@ -49,16 +48,16 @@ COLOR_R = 1
 CHARACTER_L = 2
 COLOR_L = 3
 
+# 知らない壁・タイル
+UNKNOWN = 0
+
 # 壁の状態
-WALL_UNKNOWN = 0b00000
+WALL_UNKNOWN = UNKNOWN
 WALL_NONE = 0b01000
 WALL_EXIST = 0b10000
 WALL_VIRTUAL = 0b11000
 MASK_WALL = 0b11000
 MASK_WALL_EXIST = 0b10000
-
-# 被災者と壁の組み合わせ
-UNKNOWN = WALL_UNKNOWN & VICTIM_NONE
 
 # タイルの状態
 TILE_UNKNOWN = UNKNOWN
@@ -76,19 +75,19 @@ COST_MOVE = 1
 COST_TURN = 1
 COST_BUMP = 10000
 
-# 開始時をNORTHとした絶対的な向き
+# 開始時をNORTHとした絶対的な向き（北から反時計回りに0,1,2,3なので加算・減算で回転が表現できる 4の剰余をとれば向きが得られる）
 NORTH = 0
 WEST = 1
 SOUTH = 2
 EAST = 3
 
-# ロボットからみた向き
+# ロボットからみた向き（上と同じ定義）
 FRONT = 0
 LEFT = 1
 BACK = 2
 RIGHT = 3
 
-# 操作量(Manipulated Value) 順にNORTH, WEST, SOUTH, EAST
+# 操作量(Manipulated Value) 順にNORTH, WEST, SOUTH, EAST これをpositionに加算すると移動できる
 MV = ((-1, 0), (0, -1), (1, 0), (0, 1))
 
 # x,y軸の定数(インデックス)
@@ -96,14 +95,15 @@ x, y = (1, 0)
 
 
 class MazeSolver():
+    """迷路探索のクラス
+    """
+
     # 迷路のマップ
     map_maze = np.array([
         [UNUSED, UNKNOWN, UNUSED],
         [UNKNOWN, UNKNOWN, UNKNOWN],
         [UNUSED, UNKNOWN, UNUSED]
     ])
-    # 通った回数のマップ
-    map_count = np.array([0])
     # マップのサイズ(y,x)
     map_size = [1, 1]
     # ロボットの位置(y,x)
@@ -133,14 +133,17 @@ class MazeSolver():
 
         Args:
             status (int): マップにsetするデータ
-            direction_from_robot (int | None, optional): setする壁の向き(タイルの場合設定しない(None)). Defaults to None.
-            is_tile: タイルをsetするか デフォルトはfalse(壁をsetする)
+            direction_from_robot (int | None, optional): setする壁のロボットから見た向き(ロボットがいるタイルにsetする場合(デフォルト)はNone).
+            is_tile: ロボットの隣のタイルをsetするか デフォルトはfalse(壁をsetする)
         """
+        # ロボットがいるタイルにset
         if direction_from_robot == None:
             self.map_maze[self.position[y]][self.position[x]] = status
+        # ロボットの隣のタイルにset
         elif is_tile:
             self.map_maze[self.position[y]+(MV[(self.direction+direction_from_robot) % 4][y])*2
                           ][self.position[x] + (MV[(self.direction+direction_from_robot) % 4][x])*2] = status
+        # 壁にset
         else:
             self.map_maze[self.position[y]+MV[(self.direction+direction_from_robot) % 4][y]
                           ][self.position[x] + MV[(self.direction+direction_from_robot) % 4][x]] |= status
@@ -149,10 +152,10 @@ class MazeSolver():
         """マップの情報をgetする関数
 
         Args:
-            position: getするposition
-            direction: 機体の絶対的な向き
-            direction_from_robot (int | None, optional): getする壁の向き(タイルの場合設定しない(None)). Defaults to None.
-            is_tile: タイルをgetするか デフォルトはfalse(壁をgetする)
+            position(tuple[int,int]): getするposition
+            direction(int): 機体の絶対的な向き
+            direction_from_robot (int | None, optional): getする壁のロボットから見た向き(ロボットがいるタイルにgetする場合(デフォルト)はNone).
+            is_tile(bool, optional): ロボットの隣のタイルをgetするか デフォルトはfalse(壁をgetする)
 
         Returns:
             int: getした値
@@ -168,6 +171,9 @@ class MazeSolver():
 
     def change_position(self, move: int):
         """moveの値に従ってpositionとdirectionを変える関数
+
+        Args:
+            move(int): 動かす方向 (MOVE_FORWARD, MOVE_RIGHT, MOVE_LEFT, MOVE_BACK)
         """
         if move == MOVE_FORWARD:
             self.position[x] += MV[(self.direction+FRONT) % 4][x]*2
@@ -191,12 +197,12 @@ class MazeSolver():
             self.extend_map(SOUTH)
 
     def get_position(self, position: tuple[int, int], direction: int, direction_from_robot: int) -> list[int, int]:
-        """任意のposition,direction,direction_robotからpositionを計算する関数
+        """任意のposition,direction,direction_from_robotからpositionを計算する関数
 
         Args:
-            position (_type_): position
-            direction (_type_): 機体の向き
-            direction_from_robot (_type_): 機体からみた向き
+            position (tuple[int, int]): position
+            direction (int): 機体の向き
+            direction_from_robot (int): 機体からみた向き
 
         Returns:
             list[int,int]: 計算したposition
@@ -205,11 +211,26 @@ class MazeSolver():
                 position[x]+(MV[(direction+direction_from_robot) % 4][x])*2]
 
     def calc_path(self, start_position: tuple[int, int], goal_position: tuple[int, int]) -> list:
+        """start_positionからgoal_positionまでの最短経路を計算する関数
+
+        Args:
+            start_position (tuple[int, int]): 開始位置
+            goal_position (tuple[int, int]): 終了位置
+
+        Returns:
+            list: 最短経路(通るタイルのpositionのリスト)
+        """
+        # ゴールから逆算していく
         position = goal_position
+        # コストのマップを∞で初期化
         cost_map = np.full(self.map_size, np.inf)
+        # 探索中の向き
         direction = NORTH
+        # 探索中の経路
         paths = []
+        # 継続フラグ
         continue_flag = True
+        # start_positionまで到達できた経路
         answer_paths = []
         # 初回だけ例外処理(direction)
         if position[y] > 1:
@@ -222,6 +243,7 @@ class MazeSolver():
                 if position_temp == start_position:
                     continue_flag = False
                     answer_paths.append([[position], (1, NORTH)])
+                # まだ到達していない
                 else:
                     cost_map[position_temp[y]//2][position_temp[x]//2] = 1
                     paths.append([[position_temp, goal_position], (1, NORTH)])
@@ -235,6 +257,7 @@ class MazeSolver():
                 if position_temp == start_position:
                     continue_flag = False
                     answer_paths.append([[position], (1, EAST)])
+                # まだ到達していない
                 else:
                     cost_map[position_temp[y]//2][position_temp[x]//2] = 1
                     paths.append([[position_temp, goal_position], (1, EAST)])
@@ -248,6 +271,7 @@ class MazeSolver():
                 if position_temp == start_position:
                     continue_flag = False
                     answer_paths.append([[position], (1, WEST)])
+                # まだ到達していない
                 else:
                     cost_map[position_temp[y]//2][position_temp[x]//2] = 1
                     paths.append([[position_temp, goal_position], (1, WEST)])
@@ -261,11 +285,14 @@ class MazeSolver():
                 if position_temp == start_position:
                     continue_flag = False
                     answer_paths.append(paths[[position], (1, SOUTH)])
+                # まだ到達していない
                 else:
                     cost_map[position_temp[y]//2][position_temp[x]//2] = 1
                     paths.append([[position_temp, goal_position], (1, SOUTH)])
-        # 最短経路を求めていく
+
+        # 経路を求めていく
         while continue_flag:
+            # コストが最小のpathを取得し、その次に進めるタイルを求める
             paths.sort(key=lambda x: x[1][0])
             cost = paths[0][1][0]
             min_paths = [i for i in paths if i[1][0] == cost]
@@ -282,11 +309,13 @@ class MazeSolver():
                     if position_temp == start_position:
                         continue_flag = False
                         answer_paths.append(path)
+                    # 前のタイルがバンプか坂
                     elif self.get_map(position, direction, FRONT) == TILE_BUMP_SLOPE:
                         # 今のコスト+COST_BUMPが移動先のタイルのコストより小さい
                         if cost+COST_BUMP < cost_map[position_temp[y]//2][position_temp[x]//2]:
                             cost_map[position_temp[y]//2][position_temp[x]//2] = cost+COST_BUMP
                             paths.append([[position_temp]+path[0], (cost+COST_BUMP, direction)])
+                    # 前のタイルが普通のタイル
                     else:
                         # 今のコスト+COST_MOVEが移動先のタイルのコストより小さい
                         if cost+COST_MOVE < cost_map[position_temp[y]//2][position_temp[x]//2]:
@@ -301,11 +330,13 @@ class MazeSolver():
                     if position_temp == start_position:
                         continue_flag = False
                         answer_paths.append(path)
+                    # 右のタイルがバンプか坂
                     elif self.get_map(position, direction, RIGHT) == TILE_BUMP_SLOPE:
                         # 今のコスト+COST_BUMPが移動先のタイルのコストより小さい
                         if cost+COST_BUMP < cost_map[position_temp[y]//2][position_temp[x]//2]:
                             cost_map[position_temp[y]//2][position_temp[x]//2] = cost+COST_BUMP
                             paths.append([[position_temp]+path[0], (cost+COST_BUMP, direction)])
+                    # 右のタイルが普通のタイル
                     else:
                         # 今のコスト+COST_MOVE+COST_TURNが移動先のタイルのコストより小さい
                         if cost+COST_MOVE+COST_TURN < cost_map[position_temp[y]//2][position_temp[x]//2]:
@@ -320,11 +351,13 @@ class MazeSolver():
                     if position_temp == start_position:
                         continue_flag = False
                         answer_paths.append(path)
+                    # 左のタイルがバンプか坂
                     elif self.get_map(position, direction, LEFT) == TILE_BUMP_SLOPE:
                         # 今のコスト+COST_BUMPが移動先のタイルのコストより小さい
                         if cost+COST_BUMP < cost_map[position_temp[y]//2][position_temp[x]//2]:
                             cost_map[position_temp[y]//2][position_temp[x]//2] = cost+COST_BUMP
                             paths.append([[position_temp]+path[0], (cost+COST_BUMP, direction)])
+                    # 左のタイルが普通のタイル
                     else:
                         # 今のコスト+COST_MOVE+COST_TURNが移動先のタイルのコストより小さい
                         if cost+COST_MOVE+COST_TURN < cost_map[position_temp[y]//2][position_temp[x]//2]:
@@ -332,6 +365,7 @@ class MazeSolver():
                             paths.append([[position_temp]+path[0], (cost+COST_MOVE+COST_TURN, direction)])
         min_cost = float('inf')
         answer_path = []
+        # コストが最小の経路を求める
         for path in answer_paths:
             if path[1][0] < min_cost:
                 min_cost = path[1][0]
@@ -339,11 +373,15 @@ class MazeSolver():
         return answer_path[0]
 
     def extend_map(self, direction: int):
+        """マップをdirectionの方向に拡張する関数
+
+        Args:
+            direction (int): 拡張する方向
+        """
         if direction == NORTH:
             temp = [[UNKNOWN for i in range(self.map_size[x]*2+1)]for j in range(2)]
             self.map_maze = np.vstack((temp, self.map_maze))
             temp = [0 for i in range(self.map_size[x])]
-            self.map_count = np.vstack((temp, self.map_count))
             self.map_size[y] += 1
             self.position[y] += 2
             self.start_position[y] += 2
@@ -353,13 +391,11 @@ class MazeSolver():
             temp = [[UNKNOWN for i in range(self.map_size[x]*2+1)]for j in range(2)]
             self.map_maze = np.vstack((self.map_maze, temp))
             temp = [0 for i in range(self.map_size[x])]
-            self.map_count = np.vstack((self.map_count, temp))
             self.map_size[y] += 1
         elif direction == WEST:
             temp = [[UNKNOWN, UNKNOWN]for i in range(self.map_size[y]*2+1)]
             self.map_maze = np.hstack((temp, self.map_maze))
             temp = [[0] for i in range(self.map_size[y])]
-            self.map_count = np.hstack((temp, self.map_count))
             self.map_size[x] += 1
             self.position[x] += 2
             self.start_position[x] += 2
@@ -369,10 +405,11 @@ class MazeSolver():
             temp = [[UNKNOWN, UNKNOWN]for i in range(self.map_size[y]*2+1)]
             self.map_maze = np.hstack((self.map_maze, temp))
             temp = [[0] for i in range(self.map_size[y])]
-            self.map_count = np.hstack((self.map_count, temp))
             self.map_size[x] += 1
 
     def draw_map(self):
+        """標準出力にマップを描画する関数
+        """
         print("   ", end="")
         for i in range(self.map_size[x]*2+1):
             print("{:2d} ".format(i), end="")
@@ -403,7 +440,16 @@ class MazeSolver():
                     print("   ", end="")
             print("")
 
-    def calc_move(self, from_pico: int) -> tuple[bool, int]:
+    def calc_to_pico(self, from_pico: int) -> tuple[bool, int]:
+        """picoから送られてきたデータからpicoに送るデータを計算する関数
+
+        Args:
+            from_pico(int): picoから送られてきたデータ
+
+        Returns:
+            tuple[bool, int]: 迷路探索継続フラグ, picoに送るデータ
+        """
+
         start_flag = True
         # ビットマスク
         bits = []
@@ -434,6 +480,7 @@ class MazeSolver():
         # 壁の情報出力
         print("Wall R:{}, F:{}, L:{}".format(bits[WALL_R], bits[WALL_F], bits[WALL_L]))
 
+        # 壁の情報をset
         if not bits[BLACK]:
             self.set_map(WALL_EXIST if bits[WALL_R] else WALL_NONE, RIGHT)
             self.set_map(WALL_EXIST if bits[WALL_F] else WALL_NONE, FRONT)
@@ -450,8 +497,10 @@ class MazeSolver():
             print("Color victim on left:", end="")
             victim[COLOR_L] = int(input()) """
 
+        # picoに送るデータ
         to_pico = 0
 
+        # 被災者の計算
         if bits[HEAT_R]:
             if(self.get_map(self.position, self.direction, RIGHT) & MASK_VICTIM == VICTIM_NONE):
                 self.set_map(VICTIM_HEATED, RIGHT)
@@ -465,7 +514,6 @@ class MazeSolver():
             if(self.get_map(self.position, self.direction, RIGHT) & MASK_VICTIM == VICTIM_NONE):
                 self.set_map(victim[COLOR_R], RIGHT)
                 to_pico |= victim[COLOR_R] << SHIFT_VICTIM_R
-
         if bits[HEAT_L]:
             if(self.get_map(self.position, self.direction, LEFT) & MASK_VICTIM == VICTIM_NONE):
                 self.set_map(VICTIM_HEATED, LEFT)
@@ -479,12 +527,16 @@ class MazeSolver():
                 self.set_map(victim[COLOR_L], LEFT)
                 to_pico |= victim[COLOR_L] << SHIFT_VICTIM_L
 
+        # 移動方向(MOVE_FORWARD, MOVE_BACK, MOVE_LEFT, MOVE_RIGHT)
         move = 0
 
         # 今のタイルが未探索リストにあったなら削除する
         if self.position in self.unknown_tiles:
             self.unknown_tiles.remove(self.position)
+
+        # 経路をたどっていない
         if not self.is_routing:
+            # 初回なら後ろに壁をset
             if self.is_first:
                 self.set_map(WALL_EXIST, BACK)
                 self.is_first = False
@@ -520,22 +572,26 @@ class MazeSolver():
                 move = MOVE_LEFT
             # それ以外 = 行き止まり
             else:
+                self.is_routing = True
                 # 未探索タイルがなければスタートに戻る
                 if len(self.unknown_tiles) == 0 and not self.is_first:
                     self.path = self.calc_path(self.position, self.start_position)
-                    self.is_routing = True
                 # unknown_tilesの末尾のタイルに移動
                 else:
                     self.path = self.calc_path(self.position, self.unknown_tiles[-1])
-                    self.is_routing = True
 
+        # 経路をたどっている
         if self.is_routing:
             print('routing')
+            # pathの先頭のpositionに移動する
             position_next = self.path.pop(0)
+            # pathの最後
             if len(self.path) == 0:
                 self.is_routing = False
+                # 未探索タイルがなくなった
                 if len(self.unknown_tiles) == 0:
                     start_flag = False
+            # position_nextに移動するmoveを決める
             if self.get_position(self.position, self.direction, FRONT) == position_next:
                 move = MOVE_FORWARD
             elif self.get_position(self.position, self.direction, RIGHT) == position_next:
@@ -544,6 +600,7 @@ class MazeSolver():
                 move = MOVE_LEFT
             elif self.get_position(self.position, self.direction, BACK) == position_next:
                 move = MOVE_BACK
+        # コンソールに出力
         if move == MOVE_FORWARD:
             print('Move forward')
         elif move == MOVE_RIGHT:
@@ -554,6 +611,8 @@ class MazeSolver():
             print('Move back')
         print('Unknown tiles:', self.unknown_tiles)
         self.draw_map()
-        to_pico |= move
+        # 移動
         self.change_position(move)
+        # to_picoにmoveを入れて返す
+        to_pico |= move
         return start_flag, to_pico
